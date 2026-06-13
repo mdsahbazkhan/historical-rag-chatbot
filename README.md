@@ -28,9 +28,9 @@ This keeps retrieval accurate and makes the backend easier to maintain.
 
 I used free public APIs to collect historical data.
 
-* Weather data was collected from Open-Meteo.
-* Stock market data was collected from Yahoo Finance.
-* News articles were collected from The Guardian API.
+* Weather data was collected from Open-Meteo — covers **January 2021 to December 2025** for 10 major Indian cities.
+* Stock market data was collected from Yahoo Finance — covers **January 2020 to December 2024** for 15 NSE-listed Indian companies.
+* News articles were collected from The Guardian API — covers **January 2024 to December 2025** for India-related content.
 
 The data is stored locally in MongoDB, allowing the chatbot to answer questions without making external API calls during conversations.
 
