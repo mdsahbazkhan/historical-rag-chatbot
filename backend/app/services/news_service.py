@@ -117,9 +117,6 @@ class NewsService:
         date_filter: dict = {"date": {"$gte": date_start, "$lte": date_end}}
         records: list[dict] = []
 
-        # ------------------------------------------------------------------
-        # Step 1 – keyword + category + date
-        # ------------------------------------------------------------------
         if keywords and category:
             pattern = "|".join(re.escape(k) for k in keywords)
             records = list(
@@ -138,9 +135,6 @@ class NewsService:
                 .limit(15)
             )
 
-        # ------------------------------------------------------------------
-        # Step 2 – category + date (drop keywords)
-        # ------------------------------------------------------------------
         if not records and category:
             records = list(
                 news_collection.find(
@@ -154,9 +148,6 @@ class NewsService:
                 .limit(15)
             )
 
-        # ------------------------------------------------------------------
-        # Step 3 – keyword + date (drop category)
-        # ------------------------------------------------------------------
         if not records and keywords:
             pattern = "|".join(re.escape(k) for k in keywords)
             records = list(
@@ -174,9 +165,6 @@ class NewsService:
                 .limit(12)
             )
 
-        # ------------------------------------------------------------------
-        # Step 4 – date only
-        # ------------------------------------------------------------------
         if not records:
             records = list(
                 news_collection.find(date_filter, {"_id": 0})
@@ -184,9 +172,6 @@ class NewsService:
                 .limit(10)
             )
 
-        # ------------------------------------------------------------------
-        # Step 5 – latest available
-        # ------------------------------------------------------------------
         if not records:
             records = list(
                 news_collection.find({}, {"_id": 0})

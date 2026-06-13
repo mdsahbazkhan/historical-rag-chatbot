@@ -55,6 +55,43 @@ _SUPPORTED_STOCKS = (
     "State Bank of India, ITC, Maruti Suzuki, Bharti Airtel, Sun Pharmaceutical"
 )
 
+# ---------------------------------------------------------------------------
+# International stock detection
+# If the question clearly refers to a non-Indian company or exchange, we
+# return a polite scope message instead of an empty MongoDB result.
+# ---------------------------------------------------------------------------
+_INTERNATIONAL_COMPANIES: frozenset[str] = frozenset({
+    # US tech giants
+    "apple", "amazon", "google", "alphabet", "microsoft", "meta", "netflix",
+    "tesla", "nvidia", "amd", "intel", "qualcomm", "salesforce", "oracle",
+    "ibm", "cisco", "broadcom", "adobe", "paypal", "twitter", "x corp",
+    "snapchat", "spotify", "shopify", "zoom", "uber", "lyft", "airbnb",
+    # US finance / industrials
+    "jpmorgan", "goldman sachs", "morgan stanley", "bank of america",
+    "wells fargo", "citigroup", "american express", "visa", "mastercard",
+    "berkshire", "warren buffett", "boeing", "general motors", "ford",
+    "general electric", "3m", "johnson & johnson", "pfizer", "moderna",
+    # European / Asian
+    "samsung", "toyota", "sony", "honda", "hyundai", "alibaba", "tencent",
+    "baidu", "xiaomi", "tsmc", "nintendo", "softbank", "lvmh", "nestle",
+    "volkswagen", "bmw", "mercedes", "siemens", "shell", "bp", "hsbc",
+    "barclays", "ubs", "deutsche bank",
+    # Exchanges / indices (non-Indian)
+    "nasdaq", "nyse", "s&p 500", "s&p500", "dow jones", "dow", "ftse",
+    "nikkei", "hang seng", "dax", "cac 40", "shanghai", "forex",
+    "cryptocurrency", "bitcoin", "ethereum", "crypto",
+})
+
+_INTL_MESSAGE = (
+    "This chatbot covers Indian stock market data only (NSE-listed companies). "
+    "It does not support international stocks, US markets (NASDAQ/NYSE), "
+    "cryptocurrency, or forex. "
+    "Supported Indian stocks: Reliance Industries, TCS, Infosys, HDFC Bank, "
+    "ICICI Bank, Wipro, HCL Technologies, Bajaj Finance, Kotak Mahindra Bank, "
+    "Hindustan Unilever, State Bank of India, ITC, Maruti Suzuki, "
+    "Bharti Airtel, Sun Pharmaceutical."
+)
+
 # Dataset boundaries (must match ingest_stock.py)
 _DS_START = "2020-01-01"
 _DS_END   = "2025-01-01"
@@ -79,7 +116,16 @@ class StockService:
         return None
 
     @staticmethod
+    def _is_international(question: str) -> bool:
+        q = question.lower()
+        return any(name in q for name in _INTERNATIONAL_COMPANIES)
+
+    @staticmethod
     def process(question: str) -> dict:
+        # Scope check: politely refuse international / non-NSE queries
+        if StockService._is_international(question):
+            return {"answer": _INTL_MESSAGE}
+
         company    = StockService._extract_company(question)
         month_only = extract_month_only(question)
 
