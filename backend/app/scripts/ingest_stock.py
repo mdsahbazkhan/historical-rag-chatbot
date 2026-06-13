@@ -1,5 +1,5 @@
 """
-Fetch 5 years (2021-01-01 → 2025-12-31) of REAL daily OHLCV stock data for
+Fetch 5 years (2020-01-01 → 2024-12-31) of REAL daily OHLCV stock data for
 15 NSE-listed Indian companies from Yahoo Finance's chart API and store in
 MongoDB.
 

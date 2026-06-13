@@ -7,23 +7,93 @@ from app.services.news_service import NewsService
 
 chat_history_collection = db["chat_history"]
 
-_SERVICES = {
+_SERVICES: dict = {
     "weather": WeatherService,
-    "stock": StockService,
-    "news": NewsService,
+    "stock":   StockService,
+    "news":    NewsService,
 }
+
+# ---------------------------------------------------------------------------
+# Wrong-mode detection
+#
+# Each domain has a set of signal words.  If a question scores zero points for
+# the current mode but scores >0 for another mode, we return a redirect
+# instead of an empty or misleading MongoDB result.
+#
+# Signals are intentionally conservative — only words that unambiguously belong
+# to one domain — to avoid false positives on ambiguous questions.
+# ---------------------------------------------------------------------------
+_DOMAIN_SIGNALS: dict[str, frozenset[str]] = {
+    "weather": frozenset({
+        "temperature", "weather", "humidity", "rainfall", "rain",
+        "wind", "celsius", "cloudy", "sunny", "heatwave", "fog",
+        "climate", "forecast", "degrees", "precipitation",
+        "monsoon season", "winter in", "summer in",
+    }),
+    "stock": frozenset({
+        "stock", "share price", "closing price", "opening price",
+        "nse", "sensex", "nifty", "bse", "ipo", "dividend",
+        "trading", "market cap", "quarterly result",
+        "reliance", "tcs", "infosys", "hdfc", "icici", "wipro",
+        "bajaj finance", "kotak", "airtel", "maruti", "sbi", "itc",
+    }),
+    "news": frozenset({
+        "news", "article", "headline", "election", "parliament",
+        "minister", "government", "policy", "protest", "crisis",
+        "announced", "scheme", "incident", "report",
+    }),
+}
+
+_MODE_LABELS: dict[str, str] = {
+    "weather": "Weather",
+    "stock":   "Stock",
+    "news":    "News",
+}
+
+
+def _detect_wrong_mode(mode: str, question: str) -> str | None:
+    """Return a redirect message when the question clearly belongs to a
+    different domain and has no signals for the current one.
+
+    Returns None when the question is on-topic or ambiguous.
+    """
+    q = question.lower()
+
+    current_score = sum(1 for sig in _DOMAIN_SIGNALS[mode] if sig in q)
+    if current_score > 0:
+        return None  # Question matches the current mode — let it through
+
+    other_scores = {
+        domain: sum(1 for sig in signals if sig in q)
+        for domain, signals in _DOMAIN_SIGNALS.items()
+        if domain != mode
+    }
+
+    best_other = max(other_scores, key=other_scores.get)
+    if other_scores[best_other] > 0:
+        return (
+            f"This is the {_MODE_LABELS[mode]} assistant. "
+            f"Your question appears to be about {_MODE_LABELS[best_other]} data. "
+            f"Please switch to {_MODE_LABELS[best_other]} mode for this query."
+        )
+
+    return None  # No strong signal for any domain — let the service handle it
 
 
 class ChatService:
     """Dispatch requests to the correct domain service and persist history.
 
-    Single responsibility: routing + error boundary + history write.
-    All domain logic lives in the individual services.
+    Responsibilities (single layer):
+      - validate mode and question
+      - wrong-mode redirect (fast path — no DB call)
+      - delegate to domain service
+      - error boundary
+      - persist to chat_history
     """
 
     @staticmethod
     def process(mode: str, question: str) -> dict:
-        mode = mode.strip().lower()
+        mode    = mode.strip().lower()
         service = _SERVICES.get(mode)
 
         if not service:
@@ -34,29 +104,34 @@ class ChatService:
                 )
             }
 
-        if not question or not question.strip():
+        question = (question or "").strip()
+        if not question:
             return {"error": "Question must not be empty."}
 
-        try:
-            result = service.process(question.strip())
-        except RuntimeError as exc:
-            # Gemini / MongoDB runtime errors surfaced by services
-            result = {"error": str(exc)}
-        except Exception as exc:
-            result = {"error": f"Unexpected error: {exc}"}
+        # Fast-path: redirect cross-domain questions without touching MongoDB
+        redirect = _detect_wrong_mode(mode, question)
+        if redirect:
+            result: dict = {"answer": redirect}
+        else:
+            try:
+                result = service.process(question)
+            except RuntimeError as exc:
+                result = {"error": str(exc)}
+            except Exception as exc:
+                result = {"error": f"Unexpected server error: {exc}"}
 
-        # Persist every exchange regardless of success/failure.
+        # Persist every exchange; history write must never break the response
         try:
             chat_history_collection.insert_one(
                 {
-                    "mode": mode,
-                    "question": question.strip(),
-                    "answer": result.get("answer"),
-                    "error": result.get("error"),
+                    "mode":      mode,
+                    "question":  question,
+                    "answer":    result.get("answer"),
+                    "error":     result.get("error"),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
         except Exception:
-            pass  # History write must never break the response.
+            pass
 
         return result

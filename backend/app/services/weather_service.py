@@ -1,15 +1,20 @@
 import re
-import calendar
 
 from app.config.database import db
 from app.services.rag_service import RAGService
 from app.services.gemini_service import GeminiService
+from app.utils.date_parser import (
+    extract_date_range,
+    extract_month_only,
+    extract_season_months,
+)
 
 weather_collection = db["weather_data"]
 
-# -------------------------------------------------------------------
-# Known Indian cities (longest-first for greedy matching).
-# -------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# City data
+# ---------------------------------------------------------------------------
+# Ordered longest-first so that "new delhi" matches before "delhi".
 _CITIES = [
     "visakhapatnam", "ahmedabad", "hyderabad", "bangalore", "bengaluru",
     "new delhi", "lucknow", "chennai", "kolkata", "calcutta", "mumbai",
@@ -18,111 +23,159 @@ _CITIES = [
     "delhi", "pune",
 ]
 
-_CITY_ALIASES = {
-    "bombay": "Mumbai",
-    "madras": "Chennai",
-    "calcutta": "Kolkata",
+_CITY_ALIASES: dict[str, str] = {
+    "bombay":    "Mumbai",
+    "madras":    "Chennai",
+    "calcutta":  "Kolkata",
     "bengaluru": "Bangalore",
     "new delhi": "Delhi",
 }
 
-_MONTH_MAP = {
-    "january": "01", "february": "02", "march": "03",
-    "april": "04", "may": "05", "june": "06",
-    "july": "07", "august": "08", "september": "09",
-    "october": "10", "november": "11", "december": "12",
-}
-
-_MONTH_PATTERN = (
-    r"January|February|March|April|May|June|July|August"
-    r"|September|October|November|December"
+_AVAILABLE_CITIES = (
+    "Delhi, Mumbai, Chennai, Hyderabad, Bangalore, "
+    "Kolkata, Pune, Ahmedabad, Jaipur, Lucknow"
 )
+
+# Phrases that indicate the user wants to compare cities rather than ask
+# about a specific one.
+_COMPARISON_SIGNALS: frozenset[str] = frozenset({
+    "which city", "hottest city", "coldest city", "rainiest city",
+    "wettest city", "windiest city", "most rain", "all cities",
+    "compare cities", "across cities",
+})
+
+# Dataset boundaries (must match ingest_weather.py date range)
+_DS_START = "2021-01-01"
+_DS_END   = "2025-12-31"
 
 
 class WeatherService:
     """Retrieve relevant weather records from MongoDB and generate an answer.
 
-    Pipeline:
-      question → extract city + date range → MongoDB query
-      → RAGService.build_weather_context → GeminiService.generate → answer
+    Query pipeline (each step only runs if the previous one returned nothing):
+      1. Exact date / date range           – "Delhi on 15 June 2022"
+      2. Month-only trend (multi-year)     – "How hot is Delhi in June?"
+      3. Seasonal trend                    – "Delhi weather in winter"
+      4. City-comparison (no city filter)  – "Which city is hottest in May?"
+      5. City-only latest records          – fallback when date missing
+      6. Latest available records          – last-resort give-Gemini-something
     """
 
     @staticmethod
     def _extract_city(question: str) -> str | None:
         q = question.lower()
-        for city in _CITIES:               # longest match wins
+        for city in _CITIES:
             if city in q:
                 return _CITY_ALIASES.get(city, city.title())
         return None
 
     @staticmethod
-    def _extract_date_range(question: str) -> tuple[str, str]:
-        # 1) ISO date — "2023-03-23"
-        m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", question)
-        if m:
-            d = m.group(1)
-            return d, d
+    def _is_comparison(question: str) -> bool:
+        q = question.lower()
+        return any(sig in q for sig in _COMPARISON_SIGNALS)
 
-        # 2) "23 March 2023" or "March 23, 2023"
-        m = re.search(
-            rf"\b(\d{{1,2}})\s+({_MONTH_PATTERN})\s+(\d{{4}})\b",
-            question, re.IGNORECASE,
-        )
-        if m:
-            day = m.group(1).zfill(2)
-            month = _MONTH_MAP[m.group(2).lower()]
-            year = m.group(3)
-            d = f"{year}-{month}-{day}"
-            return d, d
-
-        # 3) "March 2023" → full month
-        m = re.search(rf"\b({_MONTH_PATTERN})\s+(\d{{4}})\b", question, re.IGNORECASE)
-        if m:
-            month = _MONTH_MAP[m.group(1).lower()]
-            year = m.group(2)
-            last = calendar.monthrange(int(year), int(month))[1]
-            return f"{year}-{month}-01", f"{year}-{month}-{last:02d}"
-
-        # 4) Just a year — "in 2022"
-        m = re.search(r"\b(20[12]\d)\b", question)
-        if m:
-            year = m.group(1)
-            return f"{year}-01-01", f"{year}-12-31"
-
-        # 5) Default: full dataset range
-        return "2020-01-01", "2024-12-31"
+    @staticmethod
+    def _city_filter(city: str) -> dict:
+        return {"city": {"$regex": f"^{re.escape(city)}$", "$options": "i"}}
 
     @staticmethod
     def process(question: str) -> dict:
-        city = WeatherService._extract_city(question)
-        date_start, date_end = WeatherService._extract_date_range(question)
+        city          = WeatherService._extract_city(question)
+        month_only    = extract_month_only(question)
+        season_months = extract_season_months(question)
+        comparison    = WeatherService._is_comparison(question)
 
-        query: dict = {"date": {"$gte": date_start, "$lte": date_end}}
-        if city:
-            query["city"] = {"$regex": f"^{re.escape(city)}$", "$options": "i"}
+        date_start, date_end = extract_date_range(
+            question, default_start=_DS_START, default_end=_DS_END,
+        )
+        specific_date_found = (date_start != _DS_START or date_end != _DS_END)
 
-        records = list(weather_collection.find(query, {"_id": 0}).limit(20))
+        records: list[dict] = []
 
-        # Fallback: relax the date filter, keep the city.
+        # ------------------------------------------------------------------
+        # Step 1 – exact date / date range (existing behaviour, unchanged)
+        # ------------------------------------------------------------------
+        if specific_date_found:
+            query: dict = {"date": {"$gte": date_start, "$lte": date_end}}
+            if city:
+                query.update(WeatherService._city_filter(city))
+            records = list(weather_collection.find(query, {"_id": 0}).limit(30))
+
+        # ------------------------------------------------------------------
+        # Step 2 – month-only trend query across all stored years
+        # "How hot is Delhi in June usually?"  →  regex "-06-" on all years
+        # ------------------------------------------------------------------
+        if not records and month_only:
+            q2: dict = {"date": {"$regex": f"-{month_only}-"}}
+            if city:
+                q2.update(WeatherService._city_filter(city))
+            records = list(
+                weather_collection.find(q2, {"_id": 0})
+                .sort("date", 1)
+                .limit(50)
+            )
+
+        # ------------------------------------------------------------------
+        # Step 3 – seasonal trend query
+        # "What is Bangalore like during winter?"
+        # ------------------------------------------------------------------
+        if not records and season_months:
+            pattern = "|".join(f"-{m}-" for m in season_months)
+            q3: dict = {"date": {"$regex": pattern}}
+            if city:
+                q3.update(WeatherService._city_filter(city))
+            records = list(
+                weather_collection.find(q3, {"_id": 0})
+                .sort("date", 1)
+                .limit(50)
+            )
+
+        # ------------------------------------------------------------------
+        # Step 4 – city-comparison: no city filter, sort by temperature
+        # "Which city is hottest in May?"
+        # ------------------------------------------------------------------
+        if not records and comparison:
+            q4: dict = {}
+            if month_only:
+                q4["date"] = {"$regex": f"-{month_only}-"}
+            elif season_months:
+                q4["date"] = {"$regex": "|".join(f"-{m}-" for m in season_months)}
+            records = list(
+                weather_collection.find(q4, {"_id": 0})
+                .sort("temperature", -1)
+                .limit(50)
+            )
+
+        # ------------------------------------------------------------------
+        # Step 5 – city-only fallback (date not recognised or returned nothing)
+        # ------------------------------------------------------------------
         if not records and city:
             records = list(
-                weather_collection.find(
-                    {"city": {"$regex": f"^{re.escape(city)}$", "$options": "i"}},
-                    {"_id": 0},
-                )
+                weather_collection.find(WeatherService._city_filter(city), {"_id": 0})
+                .sort("date", -1)
+                .limit(20)
+            )
+
+        # ------------------------------------------------------------------
+        # Step 6 – last resort: give Gemini the most recent records available
+        # ------------------------------------------------------------------
+        if not records:
+            records = list(
+                weather_collection.find({}, {"_id": 0})
                 .sort("date", -1)
                 .limit(10)
             )
 
         if not records:
+            city_hint = f" for {city}" if city else ""
             return {
                 "answer": (
-                    "No weather data found for the specified city or date range. "
-                    "Available cities: Delhi, Mumbai, Chennai, Hyderabad, Bangalore, "
-                    "Kolkata, Pune, Ahmedabad, Jaipur, Lucknow."
+                    f"No weather data found{city_hint} for the requested period. "
+                    f"Available cities: {_AVAILABLE_CITIES}. "
+                    f"Data covers January 2021 – December 2025."
                 )
             }
 
         context = RAGService.build_weather_context(records)
-        answer = GeminiService.generate(context, question)
+        answer  = GeminiService.generate(context, question)
         return {"answer": answer}
