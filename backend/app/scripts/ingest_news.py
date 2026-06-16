@@ -30,10 +30,9 @@ from app.config.settings import GUARDIAN_API_KEY
 news_collection = db["news_data"]
 
 _BASE_URL  = "https://content.guardianapis.com/search"
-_PAGE_SIZE = 50     # Max allowed by the API
-_PAGE_LIMIT = 4     # Pages per month (4 × 50 = 200 articles/month max)
+_PAGE_SIZE = 50     
+_PAGE_LIMIT = 4     
 
-# Guardian section names → our category labels
 _SECTION_MAP: dict[str, str] = {
     "world":                "Politics",
     "politics":             "Politics",
@@ -125,9 +124,9 @@ def _fetch_month(year: int, month: int) -> list[dict]:
             })
 
         if page >= total_pgs:
-            break   # No more pages available for this month
+            break   
 
-        time.sleep(0.3)  # 0.3 s between pages — well within 5,000/day limit
+        time.sleep(0.3)  
 
     return records
 

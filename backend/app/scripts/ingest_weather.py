@@ -20,10 +20,9 @@ from app.config.database import db
 
 weather_collection = db["weather_data"]
 
-# Open-Meteo historical archive endpoint
+
 _BASE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
-# Ten major Indian cities with their GPS coordinates
 CITIES: dict[str, dict] = {
     "Delhi":       {"lat": 28.6139,  "lon": 77.2090},
     "Mumbai":      {"lat": 19.0760,  "lon": 72.8777},
@@ -37,7 +36,6 @@ CITIES: dict[str, dict] = {
     "Lucknow":     {"lat": 26.8467,  "lon": 80.9462},
 }
 
-# Daily variables requested from the API
 _DAILY_VARS = ",".join([
     "temperature_2m_mean",
     "temperature_2m_max",
@@ -48,7 +46,6 @@ _DAILY_VARS = ",".join([
     "weathercode",
 ])
 
-# WMO weather interpretation codes → human-readable condition string
 _WMO_CONDITIONS: dict[int, str] = {
     0:  "Clear Sky",
     1:  "Mostly Clear", 2: "Partly Cloudy", 3: "Overcast",
@@ -139,7 +136,7 @@ def main() -> None:
         except Exception as exc:
             print(f"ERROR — {exc}")
 
-        time.sleep(1)  # Be polite to the free API
+        time.sleep(1)  
 
     print(f"\nWeather ingestion complete — {grand_total:,} real records in MongoDB.")
 

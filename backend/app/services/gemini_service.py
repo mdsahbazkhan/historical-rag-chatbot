@@ -2,7 +2,6 @@ import re
 import google.generativeai as genai
 from app.config.settings import GEMINI_API_KEY
 
-# Configure once at import time; safe because the module is loaded once per process.
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
@@ -10,7 +9,6 @@ def _friendly_error(exc: Exception) -> str:
     """Convert a raw Gemini SDK exception into a user-readable message."""
     msg = str(exc)
 
-    # 429 — rate limit / quota exceeded
     if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
         # Try to extract the suggested retry delay (e.g. "retry in 26.1s")
         m = re.search(r"retry[^\d]*(\d+(?:\.\d+)?)\s*s", msg, re.IGNORECASE)
@@ -20,21 +18,18 @@ def _friendly_error(exc: Exception) -> str:
             + wait
         )
 
-    # 401 / 403 — bad or missing API key
     if "401" in msg or "403" in msg or "api_key" in msg.lower() or "invalid" in msg.lower():
         return (
             "Gemini API key is invalid or missing. "
             "Please check the GEMINI_API_KEY value in your .env file."
         )
 
-    # 500 / 503 — upstream server error
     if "500" in msg or "503" in msg or "unavailable" in msg.lower():
         return (
             "The Gemini AI service is temporarily unavailable. "
             "Please try again in a few minutes."
         )
 
-    # Generic fallback — still cleaner than the raw SDK dump
     return "The AI service encountered an unexpected error. Please try again."
 
 
@@ -94,7 +89,6 @@ class GeminiService:
             model = GeminiService._get_model()
             response = model.generate_content(prompt)
 
-            # Gemini may block a response; handle gracefully.
             if not response.candidates:
                 raise RuntimeError(
                     "Gemini returned an empty response (possibly blocked by safety filters)."

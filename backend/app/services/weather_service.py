@@ -11,10 +11,7 @@ from app.utils.date_parser import (
 
 weather_collection = db["weather_data"]
 
-# ---------------------------------------------------------------------------
-# City data
-# ---------------------------------------------------------------------------
-# Ordered longest-first so that "new delhi" matches before "delhi".
+
 _CITIES = [
     "visakhapatnam", "ahmedabad", "hyderabad", "bangalore", "bengaluru",
     "new delhi", "lucknow", "chennai", "kolkata", "calcutta", "mumbai",
@@ -36,15 +33,13 @@ _AVAILABLE_CITIES = (
     "Kolkata, Pune, Ahmedabad, Jaipur, Lucknow"
 )
 
-# Phrases that indicate the user wants to compare cities rather than ask
-# about a specific one.
+
 _COMPARISON_SIGNALS: frozenset[str] = frozenset({
     "which city", "hottest city", "coldest city", "rainiest city",
     "wettest city", "windiest city", "most rain", "all cities",
     "compare cities", "across cities",
 })
 
-# Dataset boundaries (must match ingest_weather.py date range)
 _DS_START = "2021-01-01"
 _DS_END   = "2025-12-31"
 
@@ -92,19 +87,13 @@ class WeatherService:
 
         records: list[dict] = []
 
-        # ------------------------------------------------------------------
-        # Step 1 – exact date / date range (existing behaviour, unchanged)
-        # ------------------------------------------------------------------
+       
         if specific_date_found:
             query: dict = {"date": {"$gte": date_start, "$lte": date_end}}
             if city:
                 query.update(WeatherService._city_filter(city))
             records = list(weather_collection.find(query, {"_id": 0}).limit(30))
 
-        # ------------------------------------------------------------------
-        # Step 2 – month-only trend query across all stored years
-        # "How hot is Delhi in June usually?"  →  regex "-06-" on all years
-        # ------------------------------------------------------------------
         if not records and month_only:
             q2: dict = {"date": {"$regex": f"-{month_only}-"}}
             if city:
@@ -115,10 +104,6 @@ class WeatherService:
                 .limit(50)
             )
 
-        # ------------------------------------------------------------------
-        # Step 3 – seasonal trend query
-        # "What is Bangalore like during winter?"
-        # ------------------------------------------------------------------
         if not records and season_months:
             pattern = "|".join(f"-{m}-" for m in season_months)
             q3: dict = {"date": {"$regex": pattern}}
@@ -130,10 +115,7 @@ class WeatherService:
                 .limit(50)
             )
 
-        # ------------------------------------------------------------------
-        # Step 4 – city-comparison: no city filter, sort by temperature
-        # "Which city is hottest in May?"
-        # ------------------------------------------------------------------
+
         if not records and comparison:
             q4: dict = {}
             if month_only:
@@ -146,9 +128,7 @@ class WeatherService:
                 .limit(50)
             )
 
-        # ------------------------------------------------------------------
-        # Step 5 – city-only fallback (date not recognised or returned nothing)
-        # ------------------------------------------------------------------
+   
         if not records and city:
             records = list(
                 weather_collection.find(WeatherService._city_filter(city), {"_id": 0})
@@ -156,9 +136,7 @@ class WeatherService:
                 .limit(20)
             )
 
-        # ------------------------------------------------------------------
-        # Step 6 – last resort: give Gemini the most recent records available
-        # ------------------------------------------------------------------
+
         if not records:
             records = list(
                 weather_collection.find({}, {"_id": 0})

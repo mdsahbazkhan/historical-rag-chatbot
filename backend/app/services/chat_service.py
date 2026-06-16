@@ -13,16 +13,7 @@ _SERVICES: dict = {
     "news":    NewsService,
 }
 
-# ---------------------------------------------------------------------------
-# Wrong-mode detection
-#
-# Each domain has a set of signal words.  If a question scores zero points for
-# the current mode but scores >0 for another mode, we return a redirect
-# instead of an empty or misleading MongoDB result.
-#
-# Signals are intentionally conservative — only words that unambiguously belong
-# to one domain — to avoid false positives on ambiguous questions.
-# ---------------------------------------------------------------------------
+
 _DOMAIN_SIGNALS: dict[str, frozenset[str]] = {
     "weather": frozenset({
         "temperature", "weather", "humidity", "rainfall", "rain",
@@ -77,7 +68,7 @@ def _detect_wrong_mode(mode: str, question: str) -> str | None:
             f"Please switch to {_MODE_LABELS[best_other]} mode for this query."
         )
 
-    return None  # No strong signal for any domain — let the service handle it
+    return None  
 
 
 class ChatService:
@@ -108,7 +99,7 @@ class ChatService:
         if not question:
             return {"error": "Question must not be empty."}
 
-        # Fast-path: redirect cross-domain questions without touching MongoDB
+
         redirect = _detect_wrong_mode(mode, question)
         if redirect:
             result: dict = {"answer": redirect}
@@ -120,7 +111,6 @@ class ChatService:
             except Exception as exc:
                 result = {"error": f"Unexpected server error: {exc}"}
 
-        # Persist every exchange; history write must never break the response
         try:
             chat_history_collection.insert_one(
                 {

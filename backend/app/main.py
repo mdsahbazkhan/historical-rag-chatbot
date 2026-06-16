@@ -9,7 +9,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow all origins during development; restrict to the React app URL in production.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,5 +23,4 @@ def health_check() -> dict:
     return {"status": "ok", "message": "Historical RAG Chatbot API is running."}
 
 
-# All chat endpoints live under /api
 app.include_router(router, prefix="/api")

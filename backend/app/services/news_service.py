@@ -7,11 +7,7 @@ from app.utils.date_parser import extract_date_range
 
 news_collection = db["news_data"]
 
-# ---------------------------------------------------------------------------
-# Category detection
-# Sorted longest-first so more specific phrases ("world cup") win over short
-# words ("sport").
-# ---------------------------------------------------------------------------
+
 _CATEGORY_SYNONYMS: list[tuple[str, str]] = sorted(
     [
         ("world cup",      "Sports"),
@@ -56,7 +52,6 @@ _CATEGORY_SYNONYMS: list[tuple[str, str]] = sorted(
     reverse=True,
 )
 
-# Words that carry no topical signal — filtered out before keyword matching
 _STOPWORDS: frozenset[str] = frozenset({
     "what", "when", "where", "which", "that", "this", "were", "have",
     "been", "from", "with", "about", "news", "india", "indian",
@@ -69,7 +64,6 @@ _STOPWORDS: frozenset[str] = frozenset({
     "various", "several", "something",
 })
 
-# Dataset boundaries (must match ingest_news.py)
 _DS_START = "2024-01-01"
 _DS_END   = "2025-12-31"
 

@@ -26,7 +26,7 @@ stock_collection = db["stock_data"]
 
 _CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 
-# Browser-like headers to avoid bot-detection by Yahoo Finance
+
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -38,7 +38,6 @@ _HEADERS = {
     "Referer":         "https://finance.yahoo.com/",
 }
 
-# 15 major NSE-listed companies covering diverse sectors
 COMPANIES: list[dict] = [
     {"company": "Reliance Industries",       "symbol": "RELIANCE.NS",   "sector": "Energy"},
     {"company": "Tata Consultancy Services", "symbol": "TCS.NS",        "sector": "IT"},
@@ -87,7 +86,6 @@ def _fetch_company(info: dict, period1: int, period2: int) -> list[dict]:
     closes  = quote.get("close",  [])
     volumes = quote.get("volume", [])
 
-    # Strip ".NS" suffix for the stored symbol field
     clean_symbol = info["symbol"].replace(".NS", "")
     records: list[dict] = []
 
@@ -128,7 +126,6 @@ def main() -> None:
     stock_collection.create_index([("company", 1), ("date", 1)], unique=True)
     stock_collection.create_index([("symbol",  1), ("date", 1)])
 
-    # Unix timestamps for the 5-year window
     period1 = int(dt.datetime(2020, 1,  1, tzinfo=dt.timezone.utc).timestamp())
     period2 = int(dt.datetime(2025, 1,  1, tzinfo=dt.timezone.utc).timestamp())
 
@@ -151,7 +148,7 @@ def main() -> None:
         except Exception as exc:
             print(f"ERROR — {exc}")
 
-        time.sleep(2)  # Respect Yahoo Finance's informal rate limit
+        time.sleep(2)  
 
     print(f"\nStock ingestion complete — {grand_total:,} real records in MongoDB.")
 
